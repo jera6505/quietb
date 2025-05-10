@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: quietb
+    runtime: python
+    buildCommand: ""
+    startCommand: "python bot.py"
+    plan: free
