@@ -1,24 +1,20 @@
 import os
 import asyncio
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from dotenv import load_dotenv
 from telegram import Bot, ChatPermissions
 from telegram.error import TelegramError
 
-# Carga variables de entorno (.env)
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
 
-# Horario de restricción (2:00 a.m. a 9:00 a.m.)
-HORA_INICIO = time(3, 0)
-HORA_FIN = time(10, 0)
+HORA_INICIO = time(2, 0)
+HORA_FIN = time(9, 0)
 
-# Estado anterior para evitar mensajes duplicados
-ultimo_estado = None
+ESTADO_PATH = "estado.txt"
 
-# Permisos: modo silencioso (solo admins pueden enviar mensajes)
 silent_permissions = ChatPermissions(
     can_send_messages=False,
     can_send_audios=False,
@@ -32,7 +28,6 @@ silent_permissions = ChatPermissions(
     can_add_web_page_previews=False
 )
 
-# Permisos: modo normal (todos pueden enviar mensajes)
 active_permissions = ChatPermissions(
     can_send_messages=True,
     can_send_audios=False,
@@ -46,11 +41,42 @@ active_permissions = ChatPermissions(
     can_add_web_page_previews=False
 )
 
+def cargar_estado_anterior():
+    if os.path.exists(ESTADO_PATH):
+        with open(ESTADO_PATH, "r") as f:
+            return f.read().strip()
+    return None
+
+def guardar_estado(estado):
+    with open(ESTADO_PATH, "w") as f:
+        f.write(estado)
+
+def hora_a_datetime(hora: time) -> datetime:
+    ahora = datetime.now()
+    return datetime.combine(ahora.date(), hora)
+
+def tiempo_para_proximo_cambio() -> int:
+    ahora = datetime.now()
+    inicio = hora_a_datetime(HORA_INICIO)
+    fin = hora_a_datetime(HORA_FIN)
+
+    if inicio > fin:
+        if ahora < fin:
+            inicio -= timedelta(days=1)
+        else:
+            fin += timedelta(days=1)
+
+    if ahora < inicio:
+        return int((inicio - ahora).total_seconds())
+    elif ahora < fin:
+        return int((fin - ahora).total_seconds())
+    else:
+        return int((inicio + timedelta(days=1) - ahora).total_seconds())
+
 async def check_and_update_permissions(bot: Bot):
-    global ultimo_estado
+    ultimo_estado = cargar_estado_anterior()
     while True:
         ahora = datetime.now().time()
-
         esta_dentro_horario = (
             HORA_INICIO <= ahora or ahora <= HORA_FIN if HORA_INICIO > HORA_FIN
             else HORA_INICIO <= ahora <= HORA_FIN
@@ -68,11 +94,14 @@ async def check_and_update_permissions(bot: Bot):
                 await bot.send_message(chat_id=GROUP_ID, text=mensaje)
 
                 print(f"[{datetime.now()}] Estado actualizado: {nuevo_estado.upper()}")
+                guardar_estado(nuevo_estado)
                 ultimo_estado = nuevo_estado
             except TelegramError as e:
                 print(f"❌ Error al actualizar permisos: {e}")
 
-        await asyncio.sleep(60)
+        segundos = tiempo_para_proximo_cambio()
+        espera = 60 if segundos <= 300 else min(3600, segundos // 2)
+        await asyncio.sleep(espera)
 
 async def main():
     bot = Bot(BOT_TOKEN)
